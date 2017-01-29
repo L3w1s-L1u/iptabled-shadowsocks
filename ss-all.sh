@@ -1,9 +1,10 @@
 #! /bin/bash
+# Maintainer: Lewis Liu <rhinoceromirinda@gmail.com>
 # This script wrapped up shadowsocks executables, with proper iptables settings.
 # See https://github.com/clowwindy/shadowsocks-libev/README.md for more information.
 # Options are in accordance with ss-* executables, for example -s, -p, -l, -k, -m 
 #   usage are the same as ss-*.
-# Non option arguments are command user want to execute: start service, stop service
+# Non option arguments are commands user want to execute: start service, stop service
 #   and update config file.
 # Usage:
 iptss_help() {
@@ -25,16 +26,17 @@ iptss_help() {
 }
 
 this_dir=`pwd`
+__file="ss-all.sh"
 # check user permissions
 user=`whoami`
 if [ "$user" != "root" ];then
-    echo "Only root user can manipulate iptables! Exit now."
+    echo "$__file: Only root user can manipulate iptables! Exit now."
     exit 127
 fi
 # check iptables availability
 iptables --version 2>&1 >/dev/null
 if [ "$?" -ne 0 ];then
-   echo "Couldn't run $iptables."
+   echo "$__file: Couldn't run $iptables."
    exit 127
 fi
 iptables=`which iptables`
@@ -45,32 +47,40 @@ ss_mode=local
 source iptables_op.sh
 
 # setup iptables for shadowsocks redirection mode
+# param:
+#       <1.server ip>
+#       <2.local port>
 ss_setup_redir_iptables() {
-    table=nat
-    chain=CHAIN_SS_REDIR
-    server_ip=$1
-    local_port=$2
+    local __table=nat
+    local __chain=CHAIN_SS_REDIR
+    local __result=
+    local __server_ip=$1
+    local __local_port=$2
     # Delete $chain if it's already there. NOTE: this will also delete all rules that referenced this chain
-    ipt_delete_chain $table $chain
-    if [ "$?" -ne 0 ];then
-        echo "Delete chain $chain failed. Still trying to create a new chain $chain..."
+    ipt_delete_chain __result $__table $__chain
+    if [ "$__result" == "false" ];then
+        echo "$__file: Delete chain $__chain failed. Still trying to create a new chain $__chain..." 2>&1 |tee -a $ss_log_file
     fi
 
     # Create a new chain 
-    $iptables -t $table -N $chain
+    $iptables -t $__table -N $__chain
 
     # Ignore shadowsocks server address
-    $iptables -t $table -A $chain -d $server_ip -j RETURN
+    $iptables -t $__table -A $__chain -d $__server_ip -j RETURN
 
     # Ignore LANS
-    ipt_nat_bypass_local $chain
+    __result=
+    ipt_nat_bypass_local __result $__chain
+    if [ "$result" == "false" ];then
+        echo "$__file: Bypass local address in $__chain failed." 2>&1 |tee -a $ss_log_file
+    fi
 
     # Redirect anything else to shadowsocks's local port
-    $iptables -t $table -A $chain -p tcp -j REDIRECT --to-ports $local_port
-    $iptables -t $table -A $chain -p udp -j REDIRECT --to-ports $local_port
+    $iptables -t $__table -A $__chain -p tcp -j REDIRECT --to-ports $__local_port
+    $iptables -t $__table -A $__chain -p udp -j REDIRECT --to-ports $__local_port
 
     # Apply the rules
-    $iptables -t $table -A OUTPUT -j $chain
+    $iptables -t $__table -A OUTPUT -j $__chain
 
 }
 
@@ -90,7 +100,7 @@ ss_setup_iptables() {
        tunnel)
            ;; #TODO: add iptables setup for tunnel mode
        *)
-           echo "Invalid shadowsocks mode: $1!"
+           echo "$__file: Invalid shadowsocks mode: $1!"
            exit 127
            ;;
    esac
@@ -116,7 +126,7 @@ ss_parse_options_and_exec() {
                  ss_config_file="$2"
                  if [ ! -f "$ss_config_file" ];then
                     error="can not find config file"
-                    echo "Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
+                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
                  fi
                  shift 2 ;;
              -h)   
@@ -131,7 +141,7 @@ ss_parse_options_and_exec() {
                  echo $ss_local_port |grep -q '[0-9]\{3,5\}'
                  if [[ "$?" != 0 ]];then
                     error="invalid local port number ( at least 3 digits port number required )"
-                    echo "Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
+                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
                     ss_local_port=1080
                  fi
                  shift 2 ;;
@@ -142,7 +152,7 @@ ss_parse_options_and_exec() {
                  echo $ss_server_port |grep -q '[0-9]\{3,5\}'
                  if [[ "$?" != 0 ]];then
                     error="invalid server port number ( at least 3 digits port number required )"
-                    echo "Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
+                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
                  fi
                  shift 2 ;;
               -s)
@@ -151,7 +161,7 @@ ss_parse_options_and_exec() {
                  echo "$ss_server_ip" |grep -q '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}'
                  if [[ "$?" != 0 ]];then
                      error="invalid server ip address"
-                     echo "Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
+                     echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
                  fi
                  shift 2 ;;
 
@@ -159,15 +169,15 @@ ss_parse_options_and_exec() {
                  shift ; break;;
              *)   
                  error="invalid option" 
-                 echo "Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
+                 echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
                  break;;
         esac
     done
  
     if [ "$error" != "No error" ];then
-        echo "Error occurred during checking user provided parameters." 
-        echo "See $ss_log_file for more details." 
-        echo "ss-${ss_mode} may not run properly."
+        echo "$__file: Error occurred during checking user provided parameters." 
+        echo "$__file: See $ss_log_file for more details." 
+        echo "$__file: ss-${ss_mode} may not run properly."
     fi
 
     # remaining non-option arguments
@@ -185,9 +195,9 @@ ss_parse_options_and_exec() {
                 parsed_options=${parsed_opt%%--*}
                 ss-${ss_mode} ${parsed_options} 2>&1 >> $ss_log_file
                 if [ "$?" -eq 0 ];then
-                    echo "ss-${ss_mode} is running now, pid: $$, log file: $ss_log_file." |tee -a "$ss_log_file"
+                    echo "$__file: ss-${ss_mode} is running now, pid: $$, log file: $ss_log_file." |tee -a "$ss_log_file"
                 else
-                    echo "ss-${ss_mode} failed to start.See log file $ss_log_file for more information."
+                    echo "$__file: ss-${ss_mode} failed to start.See log file $ss_log_file for more information."
                     exit 1
                 fi
                 ;;
@@ -196,24 +206,24 @@ ss_parse_options_and_exec() {
                 cat "$ss_pid_file" |xargs kill -9
                 ps aux|grep -q "ss-${ss_mode}\ ${parsed_options}"
                 if [ "$?" -eq 0 ];then
-                    echo "Stop ss-${ss_mode} service failed, you need to manually stop it." |tee -a "$ss_log_file"
+                    echo "$__file: Stop ss-${ss_mode} service failed, you need to manually stop it." |tee -a "$ss_log_file"
                 fi
                 # Remove iptable's shadowsocks chain in $table
                 declare -u ss_chain
                 ss_chain="chain_${ss_mode}"
                 ipt_delete_chain $table $ss_chain
                 if [ "$?" -ne 0 ];then
-                    echo "Failed to remove chain $ss_chain, you need to manually remove it." |tee -a "$ss_log_file"
+                    echo "$__file: Failed to remove chain $ss_chain, you need to manually remove it." |tee -a "$ss_log_file"
                     exit 1
                 fi
                 ;;
             update-config)
                 # TODO: update config file with user provided options
-                echo "Updating config with user provided options"
+                echo "$__file: Updating config with user provided options"
                 ;;
             *)
                 error="invalid non-option argument"
-                echo "An error: $error detected!"
+                echo "$__file: An error: $error detected!"
                 break;;
         esac
     done
@@ -246,7 +256,7 @@ case "${cmd_name}" in
     ss-tunnel.bash)
         ;; # TODO: scripts for ss-tunnel mode
     *)
-        echo "Invalid command name: ${cmd_name}!"
+        echo "$__file: Invalid command name: ${cmd_name}!"
         exit 127
         ;;
 esac

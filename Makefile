@@ -18,25 +18,13 @@ ss_script_bin		:= ${top_dir}/ss-bash
 bashrc				:= ~/.bashrc
 bashrc_bk			:= ~/.bashrc.bk
 
-# Shadowsocks modes
+# Shadowsocks modes, if new mode available, this variable should be updated with new mode
 ss_modes			:= local redir server tunnel
 
 ss_available_modes := $(foreach mode,$(ss_modes),$(subst  \
 	ss-,,$(notdir $(shell which ss-$(mode)))))
 
-#define check-available-modes
-#	for mode in ${ss_modes};do \
-#		which "ss-$${mode}" |$(GREP) -q "$${mode}" ;\
-#		if [[ "$$?" -eq 0 ]];then \
-#			ss_available_modes="$${ss_available_modes} ss-$${mode}" ;\
-#		fi \
-#	done ;\
-#	if [[ "X$${ss_available_modes}" == "X" ]];then \
-#		echo "No shadowsocks service installed. Please install shadowsocks first." ;\
-#		exit -1 ;\
-#	fi	
-#endef
-
+# install iptabled-shadowsocks
 define install-scripts
 	if [ ! -x "${iptables}" ];then \
 		echo "No iptables found in system. Please install iptables first."; \
@@ -67,6 +55,7 @@ define install-scripts
 	. ${bashrc}
 endef
 
+# uninstall iptabled-shadowsocks
 define delete-scripts
 	if [ -d ${ss_script_bin} ];then 	\
 		$(RM) -rvf ${ss_script_bin};	\
