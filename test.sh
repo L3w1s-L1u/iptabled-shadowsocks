@@ -1,9 +1,21 @@
 #! /bin/bash
-# test function
+# test functions
+config_file="shadowsocks.json.tmpl"
 run_ss_service() {
     echo "run_ss_service: ss_mode: $1"
     echo "run_ss_service: parsed_options: $@"
 }
+
+test_config_parser(){
+    ss_server_ip=
+    ss_server_port=
+    ss_local_port=
+    ss_parse_config_file
+    echo "server_ip: $ss_server_ip"
+    echo "server_port: $ss_server_port"
+    echo "local_port: $ss_local_port"
+}
+
 parse_option_and_exec() {
 
     parsed_opt=`getopt -o c:hk:l:m:p:s: -n "$0" -- "$@"`
@@ -71,6 +83,7 @@ parse_option_and_exec() {
 
 run_ss_redir() {
     ss_mode=redir
+    test_config_parser
     parse_option_and_exec "$@"
 }
 
@@ -78,8 +91,9 @@ run_ss_redir() {
 case "$0" in
     "ss-local.bash")
         ;; # TODO: scripts for ss-local mode
-    "ss-redir.bash")
+    "test.sh")
         echo "$@"
+        test_config_parser
         run_ss_redir "$@"
         ;;
     "ss-server.bash")

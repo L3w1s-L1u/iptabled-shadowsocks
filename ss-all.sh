@@ -1,5 +1,6 @@
 #! /bin/bash
 # Maintainer: Lewis Liu <rhinoceromirinda@gmail.com>
+#
 # This script wrapped up shadowsocks executables, with proper iptables settings.
 # See https://github.com/clowwindy/shadowsocks-libev/README.md for more information.
 # Options are in accordance with ss-* executables, for example -s, -p, -l, -k, -m 
@@ -71,7 +72,7 @@ ss_setup_redir_iptables() {
     # Ignore LANS
     __result=
     ipt_nat_bypass_local __result $__chain
-    if [ "$result" == "false" ];then
+    if [ "$__result" == "false" ];then
         echo "$__file: Bypass local address in $__chain failed." 2>&1 |tee -a $ss_log_file
     fi
 
@@ -83,6 +84,66 @@ ss_setup_redir_iptables() {
     $iptables -t $__table -A OUTPUT -j $__chain
 
 }
+# validate config parameters. 
+# this can be used to check options in config file or check individual option submitted by user
+# param:
+#       <1. result>: "true" if all parameters are valid and "false" if any invalid
+#       <config options...> remaining arguments are config options that need checking
+ss_validate_config_param() {
+    eval "$1='true'"
+    while true;do
+        case "$2" in
+          config_file)
+              if [ ! -f "$ss_config_file" ];then
+                  __error="can not find config file"
+              fi    
+              shift;;
+          server_ip)
+              echo "$ss_server_ip" |grep -q '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}'
+              if [[ "$?" != 0 ]];then
+                  __error="invalid server ip address"
+              fi
+              shift;;
+          server_port)            
+              echo $ss_server_port |grep -q '[0-9]\{3,5\}'
+              if [[ "$?" != 0 ]];then
+                  __error="invalid server port number ( at least 3 digits port number required )"
+              fi
+              shift;;
+          local_port)
+              echo $ss_local_port |grep -q '[0-9]\{3,5\}'
+              if [[ "$?" != 0 ]];then
+                 __error="invalid local port number ( at least 3 digits port number required )"
+              fi
+              shift;;
+          *)
+              __error="invalid validation option!"
+              break;;
+        esac
+    done
+    if [[ "$__error" != "No error" ]];then
+        echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_config_file"
+        eval "$1='false'"
+    fi
+}
+
+
+# parse config file for server settings if user doesn't provide any server configs
+ss_parse_config_file() {
+    local __result="true"
+    if [[ "$ss_config_file" == "${this_dir}/shadowsocks.json.tmpl" ]];then
+        echo "$_file: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
+        __result="false" 
+    fi
+    ss_server_ip=`awk -v pat="server" -f config_parser.awk -- $ss_config_file`
+    ss_server_port=`awk -v pat="server_port" -f config_parser.awk -- $ss_config_file`
+    ss_local_port=`awk -v pat="local_port" -f config_parser.awk -- $ss_config_file`
+    ss_validate_config_param __result server_ip server_port local_port
+    if [[ "$__result" == "false" ]];then
+        echo "$__file: Parsing config file failed. Shadowsocks may not run properly." 2>&1 |tee -a "$ss_log_file"
+        echo "$__file: See more details in $ss_log_file." 2>&1 |tee -a $ss_log_file
+    fi
+}
 
 # setup iptables according to shadowsocks mode
 # param:
@@ -92,6 +153,7 @@ ss_setup_iptables() {
        local)
            ;; #TODO: add iptables setup for local mode
        redir)
+           
            # call actual setup function
            ss_setup_redir_iptables $ss_server_ip $ss_local_port
            ;;
@@ -107,6 +169,7 @@ ss_setup_iptables() {
 }
 
 # parse user provided options and run shadowsocks with proper iptables settings
+# param: all bash command line options are passed, except non-option arguments. 
 ss_parse_options_and_exec() {
 
     # though we can just simply pass all options to ss executables, we still need to parse all options 
@@ -119,67 +182,54 @@ ss_parse_options_and_exec() {
     
     eval set -- "$parsed_opt"
     # validate options
-    error="No error"
+    local __error="No error"
+    local __result="true"
     while true; do
         case "$1" in
              -c)
-                 ss_config_file="$2"
-                 if [ ! -f "$ss_config_file" ];then
-                    error="can not find config file"
-                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
-                 fi
-                 shift 2 ;;
+                ss_config_file="$2"
+                ss_validate_config_param __result config_file
+                if [[ "$__result" == "false" ]];then
+                   echo "$__file: Warning! Can not find named config file." 2>&1 |tee -a "$ss_log_file"
+                fi
+                shift 2 ;;
              -h)   
-                 iptss_help
-                 shift ; exit 0;;
+                iptss_help
+                shift ; exit 0;;
              -k)
-                 ss_password="$2"
-                 shift 2 ;;
-
+                ss_password="$2"
+                shift 2 ;;
              -l)
-                 ss_local_port="$2"
-                 echo $ss_local_port |grep -q '[0-9]\{3,5\}'
-                 if [[ "$?" != 0 ]];then
-                    error="invalid local port number ( at least 3 digits port number required )"
-                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
-                    ss_local_port=1080
-                 fi
-                 shift 2 ;;
+                ss_local_port="$2"
+                ss_validate_config_param __result local_port
+                if [[ "$__result" == "false" ]];then
+                   echo "$__file: Warning! Invalid loal port number, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                fi
+                shift 2 ;;
              -m)
-                 shift 2 ;; # iptables don't care encryption method
+                shift 2 ;; # iptables don't care encryption method
              -p)
-                 ss_server_port="$2"
-                 echo $ss_server_port |grep -q '[0-9]\{3,5\}'
-                 if [[ "$?" != 0 ]];then
-                    error="invalid server port number ( at least 3 digits port number required )"
-                    echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
-                 fi
-                 shift 2 ;;
+                ss_server_port="$2"
+                ss_validate_config_param __result server_port
+                echo "$__file: Warning! Invalid server port number, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                shift 2 ;;
               -s)
-                 ss_server_ip="$2"
-                 # Check server's IP address
-                 echo "$ss_server_ip" |grep -q '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}'
-                 if [[ "$?" != 0 ]];then
-                     error="invalid server ip address"
-                     echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
-                 fi
-                 shift 2 ;;
+                ss_server_ip="$2"
+                ss_validate_config_param __result server_ip
+                if [[ "$__result" == "false" ]];then
+                    echo "$__file: Warning! Invalid server ip address, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                fi
+                shift 2 ;;
 
              --)   
-                 shift ; break;;
+                shift ; break;;
              *)   
-                 error="invalid option" 
-                 echo "$__file: Validating option failed: $error!" 2>&1 |tee -a $ss_log_file
-                 break;;
+                __error="invalid option: $1" 
+                echo "$__file: Validating option failed: $__error!" 2>&1 |tee -a "$ss_log_file"
+                exit 127;;
         esac
     done
  
-    if [ "$error" != "No error" ];then
-        echo "$__file: Error occurred during checking user provided parameters." 
-        echo "$__file: See $ss_log_file for more details." 
-        echo "$__file: ss-${ss_mode} may not run properly."
-    fi
-
     # remaining non-option arguments
     for arg ;do
         case $arg in
@@ -191,9 +241,11 @@ ss_parse_options_and_exec() {
                 if [ -f "$ss_pid_file" ];then
                     rm -f "$ss_pid_file"    
                 fi
+                # if no option except config file provided by user, we should use options set in config file
+                ss_parse_config_file 
                 # simply pass all options to ss executables but no non-option arguments
                 parsed_options=${parsed_opt%%--*}
-                ss-${ss_mode} ${parsed_options} 2>&1 >> $ss_log_file
+                ss-${ss_mode} ${parsed_options} 2>&1 >> "$ss_log_file"
                 if [ "$?" -eq 0 ];then
                     echo "$__file: ss-${ss_mode} is running now, pid: $$, log file: $ss_log_file." |tee -a "$ss_log_file"
                 else
@@ -222,8 +274,8 @@ ss_parse_options_and_exec() {
                 echo "$__file: Updating config with user provided options"
                 ;;
             *)
-                error="invalid non-option argument"
-                echo "$__file: An error: $error detected!"
+                __error="invalid non-option argument: $arg"
+                echo "$__file: Error parsing non option arguments: $__error" 2>&1 |tee -a "$ss_log_file"
                 break;;
         esac
     done
@@ -234,10 +286,8 @@ ss_run_redir() {
     table=nat
     ss_mode=redir
     ss_local_port=1080
-    ss_server_ip=
-    ss_server_port=
-    ss_config_file="${this_dir}/shadowsocks.json"
-    ss_pid_file="/var/run/shadowsocks.pid"
+    ss_config_file="${this_dir}/shadowsocks.json.tmpl"
+    ss_pid_file="/var/run/sh-${ss_mode}.pid"
     ss_log_file="/var/log/ss-${ss_mode}.log"
   
     ss_parse_options_and_exec "$@"
