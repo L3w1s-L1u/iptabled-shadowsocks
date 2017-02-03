@@ -135,9 +135,9 @@ ss_parse_config_file() {
         echo "$_file: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
         __result="false" 
     fi
-    ss_server_ip=`awk -v pat="server" -f config_parser.awk -- $ss_config_file`
-    ss_server_port=`awk -v pat="server_port" -f config_parser.awk -- $ss_config_file`
-    ss_local_port=`awk -v pat="local_port" -f config_parser.awk -- $ss_config_file`
+    ss_server_ip=`awk -v pat="\"server\"" -f config_parser.awk -- $ss_config_file`
+    ss_server_port=`awk -v pat="\"server_port\"" -f config_parser.awk -- $ss_config_file`
+    ss_local_port=`awk -v pat="\"local_port\"" -f config_parser.awk -- $ss_config_file`
     ss_validate_config_param __result server_ip server_port local_port
     if [[ "$__result" == "false" ]];then
         echo "$__file: Parsing config file failed. Shadowsocks may not run properly." 2>&1 |tee -a "$ss_log_file"
