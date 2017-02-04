@@ -27,7 +27,6 @@ iptss_help() {
 }
 
 this_dir=`pwd`
-__file="ss-all.sh"
 # check user permissions
 user=`whoami`
 if [ "$user" != "root" ];then
@@ -37,7 +36,7 @@ fi
 # check iptables availability
 iptables --version 2>&1 >/dev/null
 if [ "$?" -ne 0 ];then
-   echo "$__file: Couldn't run $iptables."
+   echo "ss-all.sh: Couldn't run $iptables."
    exit 127
 fi
 iptables=`which iptables`
@@ -91,7 +90,9 @@ ss_setup_redir_iptables() {
 #       <config options...> remaining arguments are config options that need checking
 ss_validate_config_param() {
     eval "$1='true'"
-    while true;do
+    __error="No error"
+    while [ "$#" -gt 1 ]
+    do
         case "$2" in
           config_file)
               if [ ! -f "$ss_config_file" ];then
@@ -121,6 +122,8 @@ ss_validate_config_param() {
               break;;
         esac
     done
+    # positional arg $1 been shifted out, set it back. FIXME: better way to avoid shifting out $1?
+    set -- __result
     if [[ "$__error" != "No error" ]];then
         echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_config_file"
         eval "$1='false'"
@@ -171,7 +174,6 @@ ss_setup_iptables() {
 # parse user provided options and run shadowsocks with proper iptables settings
 # param: all bash command line options are passed, except non-option arguments. 
 ss_parse_options_and_exec() {
-
     # though we can just simply pass all options to ss executables, we still need to parse all options 
     # provided by user because we need them to setup iptables.
 
@@ -282,6 +284,7 @@ ss_parse_options_and_exec() {
 }
 # run shadowsocks redirection mode
 ss_run_redir() {
+    local __file="ss-all.sh"
     # Default settings
     table=nat
     ss_mode=redir
@@ -306,7 +309,7 @@ case "${cmd_name}" in
     ss-tunnel.bash)
         ;; # TODO: scripts for ss-tunnel mode
     *)
-        echo "$__file: Invalid command name: ${cmd_name}!"
+        echo "ss-all.sh: Invalid command name: ${cmd_name}!"
         exit 127
         ;;
 esac

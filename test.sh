@@ -1,15 +1,83 @@
 #! /bin/bash
+__file="test.sh"
 # test functions
-config_file="shadowsocks.json.tmpl"
 run_ss_service() {
     echo "run_ss_service: ss_mode: $1"
     echo "run_ss_service: parsed_options: $@"
 }
 
+# validate config parameters. 
+# this can be used to check options in config file or check individual option submitted by user
+# param:
+#       <1. result>: "true" if all parameters are valid and "false" if any invalid
+#       <config options...> remaining arguments are config options that need checking
+ss_validate_config_param() {
+    eval "$1='true'"
+    local __error="No error"
+    while [ "$#" -gt 1 ]
+    do
+        echo "debug: \$1: $1, \$2: $2"
+        case "$2" in
+          config_file)
+              if [ ! -f "$ss_config_file" ];then
+                  __error="can not find config file"
+              fi    
+              shift;;
+          server_ip)
+              echo "$ss_server_ip" |grep -q '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}'
+              if [[ "$?" != 0 ]];then
+                  __error="invalid server ip address"
+              fi
+              shift;;
+          server_port)            
+              echo $ss_server_port |grep -q '[0-9]\{3,5\}'
+              if [[ "$?" != 0 ]];then
+                  __error="invalid server port number ( at least 3 digits port number required )"
+              fi
+              shift;;
+          local_port)
+              echo $ss_local_port |grep -q '[0-9]\{3,5\}'
+              if [[ "$?" != 0 ]];then
+                 __error="invalid local port number ( at least 3 digits port number required )"
+              fi
+              shift;;
+          *)
+              __error="invalid validation option: $2!"
+              break;;
+        esac
+    done
+    set -- __result
+    if [[ "$__error" != "No error" ]];then
+        echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_log_file"
+        eval "$1='false'"
+    fi
+}
+
+# parse config file for server settings if user doesn't provide any server configs
+ss_parse_config_file() {
+    local __result="true"
+    if [[ "$ss_config_file" == "${this_dir}/shadowsocks.json.tmpl" ]];then
+        echo "$_file: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
+        __result="false" 
+    fi
+    ss_server_ip=`awk -v pat="\"server\"" -f config_parser.awk -- $ss_config_file`
+    ss_server_port=`awk -v pat="\"server_port\"" -f config_parser.awk -- $ss_config_file`
+    ss_local_port=`awk -v pat="\"local_port\"" -f config_parser.awk -- $ss_config_file`
+    ss_validate_config_param __result server_ip server_port local_port
+    echo "Validation result: $__result
+    if [[ "$__result" == "false" ]];then
+        echo "$__file: Parsing config file failed. Shadowsocks may not run properly." 2>&1 |tee -a "$ss_log_file"
+        echo "$__file: See more details in $ss_log_file." 2>&1 |tee -a $ss_log_file
+    fi
+}
+
+
 test_config_parser(){
     ss_server_ip=
     ss_server_port=
     ss_local_port=
+    ss_config_file="shadowsocks.json.tmpl"
+    ss_log_file="/var/log/ss-test.log"
     ss_parse_config_file
     echo "server_ip: $ss_server_ip"
     echo "server_port: $ss_server_port"
@@ -28,6 +96,7 @@ parse_option_and_exec() {
         case "$1" in
             -c)
                 echo "config file is $2"
+                ss_config_file="$2"
                 shift 2
                 ;;
             -h)
@@ -55,7 +124,6 @@ parse_option_and_exec() {
                 exit 127
                 ;;
         esac
-
     done
     # remaining non-option arguments
     for arg ;do
@@ -88,12 +156,13 @@ run_ss_redir() {
 }
 
 # main
-case "$0" in
+cmd_name=${0##*/}
+echo $cmd_name
+case "$cmd_name" in
     "ss-local.bash")
         ;; # TODO: scripts for ss-local mode
     "test.sh")
         echo "$@"
-        test_config_parser
         run_ss_redir "$@"
         ;;
     "ss-server.bash")
