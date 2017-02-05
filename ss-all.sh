@@ -125,7 +125,7 @@ ss_validate_config_param() {
     # positional arg $1 been shifted out, set it back. FIXME: better way to avoid shifting out $1?
     set -- __result
     if [[ "$__error" != "No error" ]];then
-        echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_config_file"
+        echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_log_file"
         eval "$1='false'"
     fi
 }
@@ -178,7 +178,6 @@ ss_parse_options_and_exec() {
     # provided by user because we need them to setup iptables.
 
     parsed_opt=`getopt -o c:hk:l:m:p:s: -n "$0" -- "$@"`
-
     # Parse option failed
     if [ $? != 0 ]; then echo "Parsing option failed. Terminating..." >&2 ; exit 1; fi
     
@@ -243,11 +242,13 @@ ss_parse_options_and_exec() {
                 if [ -f "$ss_pid_file" ];then
                     rm -f "$ss_pid_file"    
                 fi
-                # if no option except config file provided by user, we should use options set in config file
+                # in case no option other than config file provided by user, we should use options set in config file
                 ss_parse_config_file 
                 # simply pass all options to ss executables but no non-option arguments
-                parsed_options=${parsed_opt%%--*}
-                ss-${ss_mode} ${parsed_options} 2>&1 >> "$ss_log_file"
+                ss_options=${parsed_opt%%--*}
+                # FIXME: Can't run ss-${ss_mode} "$ss_options" 2>&1 >>$ss_log_file directly, prompt "Invalid config path from ss-*. Why?
+                echo "$ss_options" |xargs ss-${ss_mode} 2>&1 >>"$ss_log_file"
+
                 if [ "$?" -eq 0 ];then
                     echo "$__file: ss-${ss_mode} is running now, pid: $$, log file: $ss_log_file." |tee -a "$ss_log_file"
                 else
@@ -289,7 +290,8 @@ ss_run_redir() {
     table=nat
     ss_mode=redir
     ss_local_port=1080
-    ss_config_file="${this_dir}/shadowsocks.json.tmpl"
+    ss_default_config_file="${this_dir}/shadowsocks.json.tmpl"
+    ss_config_file=$ss_default_config_file
     ss_pid_file="/var/run/sh-${ss_mode}.pid"
     ss_log_file="/var/log/ss-${ss_mode}.log"
   
