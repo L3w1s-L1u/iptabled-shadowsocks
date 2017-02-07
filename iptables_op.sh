@@ -1,25 +1,28 @@
 #! /bin/bash
 # Frequently used iptables operations.
 # Maintainer: Lewis Liu <rhinoceromirinda@gmail.com>
-__file="iptables_op.sh"
 
 __to_log=
 if [[ "$debug" == "verbose" ]];then
     __to_log=" 2>&1 |tee -a $ss_log_file"
 fi
+# check iptables
+ipt_check_iptables() {
+    local __file="iptables_op.sh"
+    # check user permissions
+    user=`whoami`
+    if [ "$user" != "root" ];then
+        echo "$__file:$LINENO: Only root user can manipulate iptables! Exit now." $__to_log
+        exit 127
+    fi
+    # check iptables availability
+    iptables --version 2>&1 >/dev/null
+    if [ "$?" -ne 0 ];then
+       echo "$__file:$LINENO: Couldn't run iptables." $__to_log
+       exit 127
+    fi
+}
 
-# check user permissions
-user=`whoami`
-if [ "$user" != "root" ];then
-    echo "$__file: Only root user can manipulate iptables! Exit now." $__to_log
-    exit 127
-fi
-# check iptables availability
-iptables --version 2>&1 >/dev/null
-if [ "$?" -ne 0 ];then
-   echo "$__file: Couldn't run iptables." $__to_log
-   exit 127
-fi
 # PRIVATE: get chains in a table
 # param:
 #   1.<result>: a list of chains in table
@@ -28,15 +31,18 @@ fi
 #   empty string if no chain in table
 #   a list of all chains in table, separated by blanks
 _get_chains() {
+    DEBUG set -x
+    local __file="iptables_op.sh"
     local __table=$2
     local __chains=`iptables -t $__table -nL  |  \
         awk '/^Chain\ [A-Z]*/{print $2}'`
     if [[ "X$__chains" == "X" ]];then
-        echo "$__file: Warning! No chains in table $__table." $__to_log
+        echo "$__file:$LINENO: Warning! No chains in table $__table." $__to_log
         eval "$1= "
     else
         eval "$1=$__chains"
     fi
+    DEBUG set +x
 }
 
 # PRIVATE: delete rules by reference to a chain
@@ -47,6 +53,7 @@ _get_chains() {
 #   3.<ref_chain>: the chain referenced by rules we want to delete
 _delete_rules_by_ref()
 {
+    local __file="iptables_op.sh"
     local __table=$2
     local __ref_chain=$3
     local __chains=""
@@ -54,14 +61,14 @@ _delete_rules_by_ref()
     _get_chains __chains $__table
     #debug:  echo "$__chains"
     if [["X$__chains" == "X" ]];then
-        echo "$__file: Warning! No chains in table $__table."  $__to_log
+        echo "$__file:$LINENO: Warning! No chains in table $__table."  $__to_log
         eval "$1='false'"
         return
     else
         # for every chain in $table
         for c in $__chains
         do
-           echo "$__file: Processing chain $c ..." $__to_log
+           echo "$__file: $LINENO:Processing chain $c ..." $__to_log
            # for every rule that referenced $__ref_chain
            # n_rule: rule numbers
            for n_rule in `iptables -t $__table -nL $c --line-numbers | \
@@ -71,7 +78,7 @@ _delete_rules_by_ref()
            do
              iptables -t $__table -D $c $n_rule
              if [[ "$?" -ne "0" ]];then
-                 echo "$__file: Warning! Delete rule #$n_rule in $c failed!" $__to_log
+                 echo "$__file:$LINENO: Warning! Delete rule #$n_rule in $c failed!" $__to_log
                  eval "$1='false'"
              fi
            done
@@ -108,16 +115,17 @@ ipt_query_chain() {
 #   3.<chain>: the name of the chain to which the rules to be deleted reference
 ipt_delete_rules_by_ref()
 {
-   # validate input
-   local __table=$2
-   local __ref_chain=$3
-   local __result=
-   eval "$1='true'"
-   _delete_rules_by_ref __result $__table $__ref_chain 
-   if [[ "$__result" == "false" ]];then
-       echo "$__file: Warning! Delete rules referenced $__ref_chain failed!" $__to_log
-       eval "$1='false'"
-   fi
+    local __file="iptables_op.sh"
+    # validate input
+    local __table=$2
+    local __ref_chain=$3
+    local __result=
+    eval "$1='true'"
+    _delete_rules_by_ref __result $__table $__ref_chain 
+    if [[ "$__result" == "false" ]];then
+        echo "$__file:$LINENO: Warning! Delete rules referenced $__ref_chain failed!" $__to_log
+        eval "$1='false'"
+    fi
 }
 
 # API: delete a chain
@@ -130,13 +138,14 @@ ipt_delete_rules_by_ref()
 #   2.<table> : the table which contains this chain
 #   3.<chain> : the name of the chain
 ipt_delete_chain() {
+    local __file="iptables_op.sh"
     local __table=$2
     local __chain=$3 
     local __result=
     eval "$1='true'"
-    ipt_query_chain __result $__chain 
+    ipt_query_chain __result $__table $__chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file: Warning! Named chain $__chain does not exist." $__to_log
+        echo "$__file:$LINENO: Warning! Named chain $__chain does not exist." $__to_log
         eval "$1='false'"
         return
     fi
@@ -146,7 +155,7 @@ ipt_delete_chain() {
         YES|Yes|yes|Y|y)
             ;;
         NO|No|no|N|n)
-            echo "User canceled delete operation."
+            echo "$__file:$LINENO: User canceled delete operation."
             eval "$1='false'"
             return
             ;;
@@ -161,18 +170,18 @@ ipt_delete_chain() {
     iptables -t "$__table" -F "$__chain"
 
     if [ "$?" -ne 0 ];then
-        echo "$__file: Couldn't flush all rules in chain $__chain. You need to manually delete them." $__to_log
+        echo "$__file:$LINENO: Couldn't flush all rules in chain $__chain. You need to manually delete them." $__to_log
     fi
     # delete rules referenced $chain
     _delete_rules_by_ref $__result $__table $__chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file: Delete rules which reference $__chain failed!" $__to_log
+        echo "$__file:$LINENO: Delete rules which reference $__chain failed!" $__to_log
         eval "$1='false'"
     fi
     # delete $chain
     iptables -t "$__table" -X "$__chain"
     if [ "$?" -ne 0 ];then
-        echo "$__file: Couldn't delete chain $__chain. You need to manually delete it." $__to_log
+        echo "$__file:$LINENO: Couldn't delete chain $__chain. You need to manually delete it." $__to_log
         eval "$1='false'"
     fi
 }
@@ -183,6 +192,7 @@ ipt_delete_chain() {
 #   <2.chain> : the name of the chain
 
 ipt_nat_bypass_local() {
+    local __file="iptables_op.sh"
     local __table=nat
     local __chain=$2
     eval "$1='true'"
@@ -199,7 +209,7 @@ ipt_nat_bypass_local() {
         iptables -t "$__table" -A "$__chain" -d "$addr" -j RETURN; 
         if [[ "$?" -ne 0 ]];then
             eval "$1='false'"
-            echo "$__file: Bypass local address $addr failed. You need to manually set iptables rules." $__to_log
+            echo "$__file:$LINENO: Bypass local address $addr failed. You need to manually set iptables rules." $__to_log
             break
         fi
     done

@@ -39,6 +39,7 @@ define install-scripts
 	do \
 		$(LN) -s "${ss_script}" "${ss_script_bin}/ss-$${mode}.bash"; \
 	done
+	$(CP) "${ipt_script}" "${ss_script_bin}"; \
 	if [ ! -x "${bashrc}" ];then \
 		touch ${bashrc}; \
 	fi
