@@ -138,7 +138,7 @@ ss_validate_config_param() {
 ss_parse_config_file() {
     local __result="true"
     if [[ "$ss_config_file" == "${this_dir}/shadowsocks.json.tmpl" ]];then
-        echo "$_file: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
+        echo "$_file:$LINENO: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
         __result="false" 
     fi
     ss_server_ip=`awk -v pat="\"server\"" -f config_parser.awk -- $ss_config_file`
@@ -157,7 +157,6 @@ ss_parse_config_file() {
 #       <2.ss_cmd>: shadowsocks running action: start, stop service or anything else
 ss_setup_iptables() {
     local __ss_cmd=$2
-    echo "debug: _ss_cmd: $2"
     case "$1" in
        local)
            ;; #TODO: add iptables setup for local mode
@@ -248,13 +247,12 @@ ss_parse_options_and_exec() {
                 ss_setup_iptables $ss_mode $__ss_cmd
                 # delete stale pid file
                 if [ -f "$ss_pid_file" ];then
-                    rm -f "$ss_pid_file"    
+                    rm -vf "$ss_pid_file"    
                 fi
                 # in case no option other than config file provided by user, we should use options set in config file
                 ss_parse_config_file 
                 # simply pass all options to ss executables but no non-option arguments
                 ss_options="${parsed_opt%%--*}"
-                echo "debug: $ss_options"
                 # FIXME: Can't run ss-${ss_mode} "$ss_options" 2>&1 >>$ss_log_file directly. Why?
                 echo "$ss_options" |xargs ss-${ss_mode} 2>&1 >>"$ss_log_file" &
                 if [ "$?" -eq 0 ];then
@@ -286,6 +284,7 @@ ss_parse_options_and_exec() {
                 else
                     # No pid file found. Try to get pid and kill shadowsocks service 
                     # FIXME: awk pattern matching doesn't work, but grep does
+                    # FIXME: need to strip trailing blanks in ss_options, better way to do this?
                     pattern="ss-${ss_mode}${ss_options%%\ }\$"
                     ps aux| grep -e "$pattern" |awk '{print $2}' |xargs kill -9
                     if [ "$?" -eq 0 ];then

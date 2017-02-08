@@ -31,18 +31,16 @@ ipt_check_iptables() {
 #   empty string if no chain in table
 #   a list of all chains in table, separated by blanks
 _get_chains() {
-    DEBUG set -x
     local __file="iptables_op.sh"
     local __table=$2
-    local __chains=`iptables -t $__table -nL  |  \
-        awk '/^Chain\ [A-Z]*/{print $2}'`
+    local __chains=`iptables -t $__table -nL| awk 'BEGIN{ ORS=" " } /^Chain\ [A-Z]*/{print $2}'`
+    echo "Debug:$LINENO: $__chains"
     if [[ "X$__chains" == "X" ]];then
         echo "$__file:$LINENO: Warning! No chains in table $__table." $__to_log
         eval "$1= "
     else
-        eval "$1=$__chains"
+        eval "$1='$__chains'"
     fi
-    DEBUG set +x
 }
 
 # PRIVATE: delete rules by reference to a chain
@@ -56,17 +54,17 @@ _delete_rules_by_ref()
     local __file="iptables_op.sh"
     local __table=$2
     local __ref_chain=$3
-    local __chains=""
+    local __chain_list=
     eval "$1='true'"
-    _get_chains __chains $__table
-    #debug:  echo "$__chains"
-    if [["X$__chains" == "X" ]];then
+    _get_chains __chain_list $__table
+    echo "Debug:$LINENO:__chains: $__chain_list"
+    if [[ "X$__chain_list" == "X" ]];then
         echo "$__file:$LINENO: Warning! No chains in table $__table."  $__to_log
         eval "$1='false'"
         return
     else
         # for every chain in $table
-        for c in $__chains
+        for c in $__chain_list
         do
            echo "$__file: $LINENO:Processing chain $c ..." $__to_log
            # for every rule that referenced $__ref_chain
@@ -97,15 +95,17 @@ _delete_rules_by_ref()
 ipt_query_chain() {
     local __table=$2
     local __chain=$3
-    local __chains=""
-    _get_chains __chains $__table 
-    eval "$1='false'"  
-    for c in $__chains;do
+    local __chain_list=
+    _get_chains __chain_list "$__table" 
+    echo "Debug:$LINENO: __chains: $__chain_list"
+    for c in $__chain_list;do
         if [[ "$c" == "$__chain" ]];then
+           echo "Debug: found match chain: $c"
            eval "$1='true'"  
-           break
+           return
         fi
     done
+    eval "$1='false'"  
 }
 
 # API: delete rules reference a chain
@@ -145,7 +145,7 @@ ipt_delete_chain() {
     eval "$1='true'"
     ipt_query_chain __result $__table $__chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file:$LINENO: Warning! Named chain $__chain does not exist." $__to_log
+        echo "$__file:$LINENO: Warning! Query chain: $__chain failed." $__to_log
         eval "$1='false'"
         return
     fi
