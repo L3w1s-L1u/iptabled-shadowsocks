@@ -2,24 +2,53 @@
 # Frequently used iptables operations.
 # Maintainer: Lewis Liu <rhinoceromirinda@gmail.com>
 
-__to_log=
-if [[ "$debug" == "verbose" ]];then
-    __to_log=" 2>&1 |tee -a $ss_log_file"
+log_file=/var/log/iptables_op.log
+
+# FIXME: only work when source this file in another shell script
+# Will not work if directly source it from command line
+__debug() 
+{
+    echo "${FUNCNAME[1]}:${BASH_LINENO[0]}: $* 2>&1 |tee -a $log_file"
+}
+
+if [ "$DEBUG" == "verbose" ];then
+    debug=__debug       
+else
+    debug=echo 
 fi
+
 # check iptables
 ipt_check_iptables() {
     local __file="iptables_op.sh"
     # check user permissions
     user=`whoami`
     if [ "$user" != "root" ];then
-        echo "$__file:$LINENO: Only root user can manipulate iptables! Exit now." $__to_log
+        $debug "Only root user can manipulate iptables! Exit now." 
         exit 127
     fi
     # check iptables availability
     iptables --version 2>&1 >/dev/null
     if [ "$?" -ne 0 ];then
-       echo "$__file:$LINENO: Couldn't run iptables." $__to_log
+       $debug "Couldn't run iptables." 
        exit 127
+    fi
+}
+
+# PRIVATE: check reference count of a chain
+# param:
+#   1.<__ref_count>: reference count of a chain, if no rule references this chain
+#                   the __ref_count should be 0.
+#   2.<__table>:    on which table to operate
+#   3.<__chain>:    the chain being referenced by rules
+_check_ref_count() {
+    local __table=$2
+    local __chain=$3
+    local __count=`iptables -t $__table -nL |awk -F " " -v pat="$__chain" \
+        '$2 ~ pat { print $3 } |grep -o -E "[0-9]{1,}"'`
+    if [ "X$__count" == "X" ];then
+        eval "$1='0'"
+    else
+        eval "$1='$__count'"
     fi
 }
 
@@ -36,7 +65,7 @@ _get_chains() {
     local __chains=`iptables -t $__table -nL| awk 'BEGIN{ ORS=" " } /^Chain\ [A-Z]*/{print $2}'`
     echo "Debug:$LINENO: $__chains"
     if [[ "X$__chains" == "X" ]];then
-        echo "$__file:$LINENO: Warning! No chains in table $__table." $__to_log
+        $debug "Warning! No chains in table $__table."
         eval "$1= "
     else
         eval "$1='$__chains'"
@@ -59,14 +88,14 @@ _delete_rules_by_ref()
     _get_chains __chain_list $__table
     echo "Debug:$LINENO:__chains: $__chain_list"
     if [[ "X$__chain_list" == "X" ]];then
-        echo "$__file:$LINENO: Warning! No chains in table $__table."  $__to_log
+        $debug "Warning! No chains in table $__table."
         eval "$1='false'"
         return
     else
         # for every chain in $table
         for c in $__chain_list
         do
-           echo "$__file: $LINENO:Processing chain $c ..." $__to_log
+           $debug "Processing chain $c ..." $__to_log
            # for every rule that referenced $__ref_chain
            # n_rule: rule numbers
            for n_rule in `iptables -t $__table -nL $c --line-numbers | \
@@ -76,7 +105,7 @@ _delete_rules_by_ref()
            do
              iptables -t $__table -D $c $n_rule
              if [[ "$?" -ne "0" ]];then
-                 echo "$__file:$LINENO: Warning! Delete rule #$n_rule in $c failed!" $__to_log
+                 $debug "Warning! Delete rule #$n_rule in $c failed!" 
                  eval "$1='false'"
              fi
            done
@@ -97,10 +126,10 @@ ipt_query_chain() {
     local __chain=$3
     local __chain_list=
     _get_chains __chain_list "$__table" 
-    echo "Debug:$LINENO: __chains: $__chain_list"
+    $debug "__chains: $__chain_list"
     for c in $__chain_list;do
         if [[ "$c" == "$__chain" ]];then
-           echo "Debug: found match chain: $c"
+           $debug "Found match chain: $c"
            eval "$1='true'"  
            return
         fi
@@ -123,7 +152,7 @@ ipt_delete_rules_by_ref()
     eval "$1='true'"
     _delete_rules_by_ref __result $__table $__ref_chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file:$LINENO: Warning! Delete rules referenced $__ref_chain failed!" $__to_log
+        $debug "Warning! Delete rules referenced $__ref_chain failed!" 
         eval "$1='false'"
     fi
 }
@@ -145,7 +174,7 @@ ipt_delete_chain() {
     eval "$1='true'"
     ipt_query_chain __result $__table $__chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file:$LINENO: Warning! Query chain: $__chain failed." $__to_log
+        $debug "Warning! Query chain: $__chain failed."
         eval "$1='false'"
         return
     fi
@@ -155,7 +184,7 @@ ipt_delete_chain() {
         YES|Yes|yes|Y|y)
             ;;
         NO|No|no|N|n)
-            echo "$__file:$LINENO: User canceled delete operation."
+            $debug "User canceled delete operation."
             eval "$1='false'"
             return
             ;;
@@ -168,20 +197,19 @@ ipt_delete_chain() {
 
     # flush all rules in $chain
     iptables -t "$__table" -F "$__chain"
-
     if [ "$?" -ne 0 ];then
-        echo "$__file:$LINENO: Couldn't flush all rules in chain $__chain. You need to manually delete them." $__to_log
+        $debug "Couldn't flush all rules in chain $__chain. You need to manually delete them." 
     fi
     # delete rules referenced $chain
     _delete_rules_by_ref $__result $__table $__chain 
     if [[ "$__result" == "false" ]];then
-        echo "$__file:$LINENO: Delete rules which reference $__chain failed!" $__to_log
+        $debug "Delete rules which reference $__chain failed!" 
         eval "$1='false'"
     fi
     # delete $chain
     iptables -t "$__table" -X "$__chain"
     if [ "$?" -ne 0 ];then
-        echo "$__file:$LINENO: Couldn't delete chain $__chain. You need to manually delete it." $__to_log
+        $debug "Couldn't delete chain $__chain. You need to manually delete it." 
         eval "$1='false'"
     fi
 }
@@ -209,7 +237,7 @@ ipt_nat_bypass_local() {
         iptables -t "$__table" -A "$__chain" -d "$addr" -j RETURN; 
         if [[ "$?" -ne 0 ]];then
             eval "$1='false'"
-            echo "$__file:$LINENO: Bypass local address $addr failed. You need to manually set iptables rules." $__to_log
+            $debug "Bypass local address $addr failed. You need to manually set iptables rules."
             break
         fi
     done

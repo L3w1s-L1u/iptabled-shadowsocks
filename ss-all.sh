@@ -30,9 +30,13 @@ iptables=`which iptables`
 
 # Default mode
 ss_mode=local
-# For some complex iptables routines
+# For some complex iptables routines and debug output
+# see iptables_op.sh for $debug
 source iptables_op.sh
 ipt_check_iptables
+
+# redefine log_file location
+log_file="/var/log/ss-all.log"
 
 # setup iptables for shadowsocks redirection mode
 # param:
@@ -50,7 +54,7 @@ ss_setup_redir_iptables() {
         # Delete $chain if it's already there. NOTE: this will also delete all rules that referenced this chain
         ipt_delete_chain __result $__table $__chain
         if [ "$__result" == "false" ];then
-           echo "$__file:$LINENO: Delete chain $__chain failed. Still trying to create a new chain $__chain..." 2>&1 |tee -a $ss_log_file
+           $debug "Delete chain $__chain failed. Still trying to create a new chain $__chain..."
         fi
 
         # Create a new chain 
@@ -63,7 +67,7 @@ ss_setup_redir_iptables() {
         __result=
         ipt_nat_bypass_local __result $__chain
         if [ "$__result" == "false" ];then
-           echo "$__file:$LINENO: Bypass local address in $__chain failed." 2>&1 |tee -a $ss_log_file
+           $debug " Bypass local address in $__chain failed."
         fi
 
         # Redirect anything else to shadowsocks's local port
@@ -77,12 +81,12 @@ ss_setup_redir_iptables() {
         # Remove iptable's shadowsocks chain in $table
         ipt_delete_chain __result $__table $__chain
         if [ "$__result" == "false" ];then
-           echo "$__file:$LINENO: Failed to remove chain $__chain, you need to manually remove it." |tee -a "$ss_log_file"
+           $debug " Failed to remove chain $__chain, you need to manually remove it."
            exit 1
         fi
         ;;
     *)
-        echo "$__file:$LINENO: Invalid ss command: $1! Exit now!" 2>&1|tee -a "$ss_log_file"
+        $debug " Invalid ss command: $1! Exit now!"
         exit 127;;
     esac
 }
@@ -128,7 +132,7 @@ ss_validate_config_param() {
     # positional arg $1 been shifted out, set it back. FIXME: better way to avoid shifting out $1?
     set -- __result
     if [[ "$__error" != "No error" ]];then
-        echo "Warning! Validating config options failed, last error caught: $__error" 2>&1 |tee -a "$ss_log_file"
+        $debug "Warning! Validating config options failed, last error caught: $__error"
         eval "$1='false'"
     fi
 }
@@ -138,7 +142,7 @@ ss_validate_config_param() {
 ss_parse_config_file() {
     local __result="true"
     if [[ "$ss_config_file" == "${this_dir}/shadowsocks.json.tmpl" ]];then
-        echo "$_file:$LINENO: Warning! No config file provided. Using $ss_config_file with incomplete config settings." 2>&1 |tee -a "$ss_log_file"
+        $debug "Warning! No config file provided. Using $ss_config_file with incomplete config settings."
         __result="false" 
     fi
     ss_server_ip=`awk -v pat="\"server\"" -f config_parser.awk -- $ss_config_file`
@@ -146,8 +150,8 @@ ss_parse_config_file() {
     ss_local_port=`awk -v pat="\"local_port\"" -f config_parser.awk -- $ss_config_file`
     ss_validate_config_param __result server_ip server_port local_port
     if [[ "$__result" == "false" ]];then
-        echo "$__file:$LINENO: Parsing config file failed. Shadowsocks may not run properly." 2>&1 |tee -a "$ss_log_file"
-        echo "$__file:$LINENO: See more details in $ss_log_file." 2>&1 |tee -a $ss_log_file
+        $debug "Parsing config file failed. Shadowsocks may not run properly."
+        $debug "See more details in $log_file."
     fi
 }
 
@@ -169,7 +173,7 @@ ss_setup_iptables() {
        tunnel)
            ;; #TODO: add iptables setup for tunnel mode
        *)
-           echo "$__file:$LINENO: Invalid shadowsocks mode: $1!"
+           $debug "Invalid shadowsocks mode: $1!"
            exit 127
            ;;
     esac
@@ -197,7 +201,7 @@ ss_parse_options_and_exec() {
                 ss_config_file="$2"
                 ss_validate_config_param __result config_file
                 if [[ "$__result" == "false" ]];then
-                   echo "$__file:$LINENO: Warning! Can not find named config file." 2>&1 |tee -a "$ss_log_file"
+                   $debug "Warning! Can not find named config file."
                 fi
                 shift 2 ;;
              -h)   
@@ -210,7 +214,7 @@ ss_parse_options_and_exec() {
                 ss_local_port="$2"
                 ss_validate_config_param __result local_port
                 if [[ "$__result" == "false" ]];then
-                   echo "$__file:$LINENO: Warning! Invalid loal port number, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                   $debug "Warning! Invalid loal port number, will use default value instead."
                 fi
                 shift 2 ;;
              -m)
@@ -218,13 +222,13 @@ ss_parse_options_and_exec() {
              -p)
                 ss_server_port="$2"
                 ss_validate_config_param __result server_port
-                echo "$__file:$LINENO: Warning! Invalid server port number, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                $debug " Warning! Invalid server port number, will use default value instead."
                 shift 2 ;;
               -s)
                 ss_server_ip="$2"
                 ss_validate_config_param __result server_ip
                 if [[ "$__result" == "false" ]];then
-                    echo "$__file:$LINENO: Warning! Invalid server ip address, will use default value instead." 2>&1 |tee -a "$ss_log_file"
+                    $debug "Warning! Invalid server ip address, will use default value instead."
                 fi
                 shift 2 ;;
 
@@ -232,7 +236,7 @@ ss_parse_options_and_exec() {
                 shift ; break;;
              *)   
                 __error="invalid option: $1" 
-                echo "$__file:$LINENO: Validating option failed: $__error!" 2>&1 |tee -a "$ss_log_file"
+                $debug "Validating option failed: $__error!"
                 exit 127;;
         esac
     done
@@ -253,15 +257,16 @@ ss_parse_options_and_exec() {
                 ss_parse_config_file 
                 # simply pass all options to ss executables but no non-option arguments
                 ss_options="${parsed_opt%%--*}"
-                # FIXME: Can't run ss-${ss_mode} "$ss_options" 2>&1 >>$ss_log_file directly. Why?
-                echo "$ss_options" |xargs ss-${ss_mode} 2>&1 >>"$ss_log_file" &
+                # FIXME: Can't run ss-${ss_mode} "$ss_options" 2>&1 >>$log_file directly. Why?
+                echo "$ss_options" |xargs ss-${ss_mode} 2>&1 >>"$log_file" &
                 if [ "$?" -eq 0 ];then
                     # FIXME: awk pattern matching doesn't work, but grep does
+                    # FIXME: need to strip trailing blanks in ss_options, better way to do this?
                     pattern="ss-${ss_mode}${ss_options%%\ }\$"
                     ss_pid=` ps aux| grep -e "$pattern" |awk '{print $2}'` 
-                    echo "$__file:$LINENO: ss-${ss_mode} is running now, pid: $ss_pid, log file: $ss_log_file." |tee -a "$ss_log_file"
+                    $debug "ss-${ss_mode} is running now, pid: $ss_pid, log file: $log_file."
                 else
-                    echo "$__file:$LINENO: ss-${ss_mode} failed to start.See log file $ss_log_file for more information."
+                    $debug "ss-${ss_mode} failed to start.See log file $log_file for more information."
                     exit 1
                 fi
                 ;;
@@ -273,13 +278,13 @@ ss_parse_options_and_exec() {
                     cat "$ss_pid_file" |xargs kill -9
                     ps aux|grep -q "ss-${ss_mode} ${ss_options}"
                     if [ "$?" -eq 0 ];then
-                        echo "$__file:$LINENO: Stop ss-${ss_mode} service failed, continue trying to kill process $ss_pid ..." |tee -a "$ss_log_file"
+                        $debug "Stop ss-${ss_mode} service failed, continue trying to kill process $ss_pid ..."
                     fi
                 elif [ "$ss_pid" != "0" ];then
                     kill -9 $ss_pid
                     ps aux|grep -q "ss-${ss_mode} ${ss_options}"
                     if [ "$?" -eq 0 ];then
-                        echo "$__file:$LINENO: Kill process $ss_pid failed, trying for the last time..." |tee -a "$ss_log_file"
+                        $debug "Kill process $ss_pid failed, trying for the last time..." 
                     fi
                 else
                     # No pid file found. Try to get pid and kill shadowsocks service 
@@ -288,9 +293,9 @@ ss_parse_options_and_exec() {
                     pattern="ss-${ss_mode}${ss_options%%\ }\$"
                     ps aux| grep -e "$pattern" |awk '{print $2}' |xargs kill -9
                     if [ "$?" -eq 0 ];then
-                        echo "$__file:$LINENO: Successfully stop ss-${ss_mode} service." |tee -a "$ss_log_file"
+                        $debug "Successfully stop ss-${ss_mode} service."
                     else
-                        echo "$__file:$LINENO: Stop ss-${ss_mode} service failed, you need to manually stop it." |tee -a "$ss_log_file"
+                        $debug "Stop ss-${ss_mode} service failed, you need to manually stop it." 
                     fi
                 fi
                 # remove iptables chains
@@ -299,25 +304,23 @@ ss_parse_options_and_exec() {
                 ;;
             update-config)
                 # TODO: update config file with user provided options
-                echo "$__file:$LINENO: Updating config with user provided options"
+                $debug "Updating config with user provided options"
                 ;;
             *)
                 __error="invalid non-option argument: $arg"
-                echo "$__file:$LINENO: Error parsing non option arguments: $__error" 2>&1 |tee -a "$ss_log_file"
+                $debug "Error parsing non option arguments: $__error"
                 break;;
         esac
     done
 }
 # run shadowsocks redirection mode
 ss_run_redir() {
-    local __file="ss-all.sh"
     # Default settings
     ss_mode=redir
     ss_local_port=1080
     ss_default_config_file="${this_dir}/shadowsocks.json.tmpl"
     ss_config_file=$ss_default_config_file
     ss_pid_file="/var/run/sh-${ss_mode}.pid"
-    ss_log_file="/var/log/ss-${ss_mode}.log"
     ss_pid="0"
     ss_parse_options_and_exec "$@"
 }
@@ -335,7 +338,7 @@ case "${cmd_name}" in
     ss-tunnel.bash)
         ;; # TODO: scripts for ss-tunnel mode
     *)
-        echo "ss-all.sh:$LINENO: Invalid command name: ${cmd_name}!"
+        $debug "Invalid command name: ${cmd_name}!"
         exit 127
         ;;
 esac

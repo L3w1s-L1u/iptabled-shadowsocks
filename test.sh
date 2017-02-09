@@ -1,6 +1,55 @@
 #! /bin/bash
-__file="test.sh"
-# test functions
+
+source "iptables_op.sh"
+
+# test functions for "iptables_op.sh"
+t_get_chains() {
+    local __chain_list
+    # normal case
+    for t in filter nat mangle raw security
+    do
+        _get_chains __chain_list $t
+        if [ "X$__chain_list" == "X" ];then
+            $debug "No chains in $t."
+        else
+            $debug "chains in $t: $__chain_list."
+        fi
+    done
+    # abnormal case
+    _get_chains __chain_list no_such_table
+}
+
+t_check_ref_count() {
+    local __chain=CHAIN_SS_REDIR
+    local __table=nat
+    local __ref_count="X"
+    # normal case, manually validate result
+    _check_ref_count __ref_count $__table $__chain 
+}
+
+t_delete_rules_by_ref() {
+    local __chain=CHAIN_SS_REDIR
+    local __table=nat
+    local __result=
+    $debug "Test delete all rules reference chain $__chain."
+    # add some rules in chain
+    ipt_bypass_local __result $__chain
+    if [ "$__result" == "false" ];then
+       $debug "Couldn't add rules to chain $__chain." 
+    fi
+    # delete all rules which reference $__chain
+    __result=true
+    _delete_rules_by_ref __result $__table $__chain 
+    local __ref_count="X"
+    _check_ref_count $__ref_count $__table $__chain
+
+    if [ "$__result" == "false" ] || [ "$__ref_count" -ne 0 ];then
+        $debug "Delete rules by reference failed." 
+    else
+        $debug "Delete rules by reference completed."
+    fi 
+}
+# test functions for "ss-all.sh"
 run_ss_service() {
     echo "run_ss_service: ss_mode: $1"
     echo "run_ss_service: parsed_options: $@"
@@ -156,22 +205,22 @@ run_ss_redir() {
 }
 
 # main
-cmd_name=${0##*/}
-echo $cmd_name
-case "$cmd_name" in
-    "ss-local.bash")
-        ;; # TODO: scripts for ss-local mode
-    "test.sh")
-        echo "$@"
-        run_ss_redir "$@"
-        ;;
-    "ss-server.bash")
-        ;; # TODO: scripts for ss-server mode
-    "ss-tunnel.bash")
-        ;; # TODO: scripts for ss-tunnel mode
-    *)
-        echo "Invalid command name!"
-        exit 127
-        ;;
-esac
+#cmd_name=${0##*/}
+#echo $cmd_name
+#case "$cmd_name" in
+#    "ss-local.bash")
+#        ;; # TODO: scripts for ss-local mode
+#    "test.sh")
+#        echo "$@"
+#        run_ss_redir "$@"
+#        ;;
+#    "ss-server.bash")
+#        ;; # TODO: scripts for ss-server mode
+#    "ss-tunnel.bash")
+#        ;; # TODO: scripts for ss-tunnel mode
+#    *)
+#        echo "Invalid command name!"
+#        exit 127
+#        ;;
+#esac
 
