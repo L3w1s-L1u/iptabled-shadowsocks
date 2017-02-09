@@ -10,12 +10,22 @@ __debug()
 {
     echo "${FUNCNAME[1]}:${BASH_LINENO[0]}: $* 2>&1 |tee -a $log_file"
 }
+__quiet()
+{
+    echo "$*" 2>&1 >/dev/null
+}
 
-if [ "$DEBUG" == "verbose" ];then
-    debug=__debug       
-else
-    debug=echo 
-fi
+case "$DEBUG" in
+    "verbose")
+        debug=__debug       
+        ;;
+    "silent")
+        debug=__quiet 
+        ;;
+     *)
+        debug=echo
+        ;;
+esac
 
 # check iptables
 ipt_check_iptables() {

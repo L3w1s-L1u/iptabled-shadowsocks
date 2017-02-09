@@ -71,8 +71,10 @@ ss_setup_redir_iptables() {
         fi
 
         # Redirect anything else to shadowsocks's local port
-        $iptables -t $__table -A $__chain -p tcp -j REDIRECT --to-ports $__local_port
-        $iptables -t $__table -A $__chain -p udp -j REDIRECT --to-ports $__local_port
+        #FIXME: redirect tcp/udp packages to local port will result in ss-* complain: ERROR: accept: Too many open files"
+        # maximum resource allowable for process exceeds the limit?
+        #$iptables -t $__table -A $__chain -p udp -j REDIRECT --to-ports $__local_port
+        #$iptables -t $__table -A $__chain -p tcp -j REDIRECT --to-ports $__local_port
 
         # Apply the rules
         $iptables -t $__table -A OUTPUT -j $__chain
@@ -152,6 +154,10 @@ ss_parse_config_file() {
     if [[ "$__result" == "false" ]];then
         $debug "Parsing config file failed. Shadowsocks may not run properly."
         $debug "See more details in $log_file."
+    else
+        $debug "server IP: $ss_server_ip"
+        $debug "server port: $ss_server_port"
+        $debug "local port: $ss_local_port"
     fi
 }
 
@@ -166,6 +172,7 @@ ss_setup_iptables() {
            ;; #TODO: add iptables setup for local mode
        redir)
            # call actual setup function for redir mode
+           $debug "local_port: $ss_local_port"
            ss_setup_redir_iptables $__ss_cmd $ss_server_ip $ss_local_port
            ;;
        server)
@@ -247,14 +254,14 @@ ss_parse_options_and_exec() {
             start)
                 #ss_mode=${0##ss-}
                 __ss_cmd=start
+                # in case no option other than config file provided by user, we should use options set in config file
+                ss_parse_config_file 
                 # Setup shadowsocks chain in iptables
                 ss_setup_iptables $ss_mode $__ss_cmd
                 # delete stale pid file
                 if [ -f "$ss_pid_file" ];then
                     rm -vf "$ss_pid_file"    
                 fi
-                # in case no option other than config file provided by user, we should use options set in config file
-                ss_parse_config_file 
                 # simply pass all options to ss executables but no non-option arguments
                 ss_options="${parsed_opt%%--*}"
                 # FIXME: Can't run ss-${ss_mode} "$ss_options" 2>&1 >>$log_file directly. Why?
